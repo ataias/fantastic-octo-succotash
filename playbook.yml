@@ -2,15 +2,72 @@
 - hosts: all
   become: yes
 
-  #  vars_files:
-  #    - vars.yml
+  vars_files:
+    - vars.yml
 
   pre_tasks:
     - name: Update apt cache if needed.
       apt: update_cache=yes cache_valid_time=3600
 
+  tasks:
+    - name: Install mosh
+      apt:
+        name: mosh
+        state: present
 
-  roles:
-    - role: gantsign.oh-my-zsh
-      users:
-        - username: ubuntu
+    - name: Allow UDP ports for mosh
+      ufw:
+        rule: allow
+        proto: udp
+        port: "60000:61000"
+
+    # System locale (move this to another file)
+    - name: Ensure localisation files for '{{ config_system_locale }}' are available
+      locale_gen:
+        name: "{{ config_system_locale }}"
+        state: present
+
+    - name: Ensure localisation files for '{{ config_system_language }}' are available
+      locale_gen:
+        name: "{{ config_system_language }}"
+        state: present
+
+    - name: Get current locale and language configuration
+      command: localectl status
+      register: locale_status
+      changed_when: false
+
+    - name: Parse 'LANG' from current locale and language configuration
+      set_fact:
+        locale_lang: "{{ locale_status.stdout | regex_search('LANG=([^\n]+)', '\\1') | first }}"
+
+    - name: Parse 'LANGUAGE' from current locale and language configuration
+      set_fact:
+        locale_language: "{{ locale_status.stdout | regex_search('LANGUAGE=([^\n]+)', '\\1') | default([locale_lang], true) | first }}"
+
+    - name: Configure locale to '{{ config_system_locale }}' and language to '{{ config_system_language }}'
+      command: localectl set-locale LANG={{ config_system_locale }} LANGUAGE={{ config_system_language }}
+      changed_when: locale_lang != config_system_locale or locale_language != config_system_language
+    #  roles:
+    #    - role: gantsign.oh-my-zsh
+    #      users:
+    #        - username: ubuntu
+    #
+    #          #    - role: nickjj.docker
+    #          #      tags: ["docker"]
+    #
+    #    - role: fubarhouse.rust
+    #      become: false
+    #      cargo_items:
+    #      - name: ripgrep
+    #        binary: rg
+    #      - name: git-delta
+    #        binary: delta
+    #
+
+    - name: Ensure LC_ALL is set
+      become: false
+      lineinfile:
+        path: ~/.zshrc
+        regexp: "^export LC_ALL="
+        line: export LC_ALL={{ config_system_language }}
